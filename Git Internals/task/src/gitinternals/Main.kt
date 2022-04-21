@@ -1,6 +1,7 @@
 package gitinternals
 
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.FileInputStream
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -68,6 +69,7 @@ class GitCommitObject(fileBytes: ByteArray) : GitObject() {
     lateinit var author: String
     lateinit var commiter: String
     lateinit var tree: String
+
     init {
         var nextLinesAreMessage = false
         val lines = fileBytes.decodeToString()
@@ -132,10 +134,7 @@ class GitCommitObject(fileBytes: ByteArray) : GitObject() {
     }
 }
 
-fun main() {
-    println("Enter .git directory location:")
-    val gitDirPath = readln()
-
+fun performCatFileCommand(gitDirPath: String) {
     println("Enter git object hash:")
     val objHash = readln()
     val objPath = "$gitDirPath/objects/${objHash.substring(0, 2)}/${objHash.substring(2)}"
@@ -150,5 +149,46 @@ fun main() {
 
     val gitObj = GitObject.createObject(result)
     println(gitObj)
+}
+
+fun performListBranchesCommand(gitDirPath: String) {
+
+    val currentBranchFile = File("$gitDirPath/HEAD")
+
+    val currentBranch = if (currentBranchFile.exists()) currentBranchFile
+        .readText().trimEnd('\n')
+        .split("/").last() else ""
+//    println(currentBranch)
+    val f=File("$gitDirPath/refs/heads/")
+//    println("$gitDirPath/refs/heads/")
+//    println(f.isDirectory)
+//    println(f.exists())
+    val lst =f.list() ?: arrayOf("***","***")
+//    println(lst.joinToString("-"))
+    lst.let { l ->
+        val branches = l.joinToString("\n") {
+//            println("$it --> $currentBranch")
+            val pre = if (it == currentBranch) "* " else "  "
+             pre + it
+        }
+        println(branches)
+
+    }
+
+}
+
+fun main() {
+    println("Enter .git directory location:")
+    val gitDirPath = readln()
+
+    println("Enter command:")
+    val cmd = readln()
+    if (cmd == "cat-file") {
+        performCatFileCommand(gitDirPath)
+    } else if (cmd == "list-branches") {
+        performListBranchesCommand(gitDirPath)
+    } else {
+        println("???")
+    }
 
 }
