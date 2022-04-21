@@ -86,6 +86,29 @@ class GitTreeObject(hash: String, fileBytes: ByteArray) : GitObject(hash) {
     override fun toString(): String {
         return "*TREE*\n$content"
     }
+
+    fun treeString( startDir :String,gitDirPath:String): String{
+        return content.lines().map {
+            val tokens =it.split(" ")
+            val obj = getObjectFile(tokens[1], gitDirPath )
+            when (obj) {
+                is GitCommitObject -> {
+                    if (startDir.isNotBlank()) "$startDir/${tokens[2]}" else tokens[2]
+                }
+                is GitBlobObject -> {
+                    if (startDir.isNotBlank()) "$startDir/${tokens[2]}" else tokens[2]
+                }
+                is GitTreeObject -> {
+                   val x= if (startDir.isNotBlank()) "$startDir/${tokens[2]}" else tokens[2]
+
+                    obj.treeString(x,gitDirPath)
+                }
+                else -> {
+                    ""
+                }
+            }
+        }.joinToString("\n")
+    }
 }
 
 class GitCommitObject(hash: String, fileBytes: ByteArray) : GitObject(hash) {
@@ -225,6 +248,14 @@ fun performLogCommand(gitDirPath: String) {
     }
 
 }
+fun performCommitTreeCommand(gitDirPath: String) {
+    println("Enter commit-hash:")
+    val hash = readln()
+    val commitObj =getObjectFile(hash,gitDirPath) as GitCommitObject
+    val treeObject =getObjectFile(commitObj.tree,gitDirPath) as GitTreeObject
+    println(treeObject.treeString("",gitDirPath))
+
+}
 
 fun main() {
     println("Enter .git directory location:")
@@ -238,10 +269,13 @@ fun main() {
         performListBranchesCommand(gitDirPath)
     } else if (cmd == "log") {
         performLogCommand(gitDirPath)
+    }else if (cmd == "commit-tree") {
+        performCommitTreeCommand(gitDirPath)
     } else {
         println("???")
     }
 
 }
+
 
 
