@@ -8,32 +8,57 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.zip.InflaterOutputStream
 
-open class GitObject() {
+class Contributor(
+    val name: String,
+    val email: String,
+    val commitType: String,
+    val datetimeString: String,
+    val zoneSign: String,
+    val zoneHours: String,
+    val zoneMinuts: String
+) {
+    override fun toString(): String {
+        return "$name $email $commitType timestamp: $datetimeString $zoneSign$zoneHours:$zoneMinuts"
+
+    }
+}
+
+open class GitObject(val hash: String) {
     companion object {
         val linePattern = "^(\\w+) (.+)$".toRegex()
         val authorPattern = "^(\\w+) (\\w+) <(.+)> (\\d+) ([+-])(\\d{2})(\\d{2})$".toRegex()
-        fun createObject(fileBytes: ByteArray): GitObject {
+        fun createObject(objHash: String, gitDirPath: String): GitObject {
+            val objPath = "$gitDirPath/objects/${objHash.substring(0, 2)}/${objHash.substring(2)}"
+            val fis = FileInputStream(objPath)
+            val bos1 = ByteArrayOutputStream()
+            val ios = InflaterOutputStream(bos1)
+            var ch: Int
+            while (fis.read().also { ch = it } != -1) {
+                ios.write(ch)
+            }
+            val fileBytes = bos1.toByteArray()
+
             val header = String(fileBytes, 0, fileBytes.indexOf(0))
             val groups = linePattern.findAll(header)
             return if (groups.first().groupValues[1] == "blob") {
-                GitBlobObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+                GitBlobObject(objHash, fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
             } else if (groups.first().groupValues[1] == "commit") {//if (groups.first().groupValues[1] == "commit") {
-                GitCommitObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+                GitCommitObject(objHash, fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
             } else {
-                GitTreeObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+                GitTreeObject(objHash, fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
             }
         }
     }
 }
 
-class GitBlobObject(fileBytes: ByteArray) : GitObject() {
+class GitBlobObject(hash: String, fileBytes: ByteArray) : GitObject(hash) {
     private val content = fileBytes.decodeToString() //skip the header
     override fun toString(): String {
         return "*BLOB*\n$content"
     }
 }
 
-class GitTreeObject(fileBytes: ByteArray) : GitObject() {
+class GitTreeObject(hash: String, fileBytes: ByteArray) : GitObject(hash) {
     private var content = ""
 
     init {
@@ -63,12 +88,13 @@ class GitTreeObject(fileBytes: ByteArray) : GitObject() {
     }
 }
 
-class GitCommitObject(fileBytes: ByteArray) : GitObject() {
+class GitCommitObject(hash: String, fileBytes: ByteArray) : GitObject(hash) {
     var message: String
     var parent: String = ""
-    lateinit var author: String
-    lateinit var commiter: String
+    lateinit var author: Contributor
+    lateinit var commiter: Contributor
     lateinit var tree: String
+    var merged: Boolean = false
 
     init {
         var nextLinesAreMessage = false
@@ -102,7 +128,7 @@ class GitCommitObject(fileBytes: ByteArray) : GitObject() {
         message = message.trimEnd('\n')
     }
 
-    private fun parseContributor(line: String, type: String): String {
+    private fun parseContributor(line: String, type: String): Contributor {
         val commitType = if (type == "committer") "commit" else "original"
         val authGroups = authorPattern.findAll(line).first()
         val name = authGroups.groupValues[2]
@@ -121,7 +147,15 @@ class GitCommitObject(fileBytes: ByteArray) : GitObject() {
         )
         val formtter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
         val datetimeString = formtter.format(instant)
-        return "$name $email $commitType timestamp: $datetimeString $zoneSign$zoneHours:$zoneMinuts"
+        return Contributor(name, email, commitType, datetimeString, zoneSign, zoneHours, zoneMinuts)
+    }
+
+    fun logString(): String {
+        val mergedStr = if (merged) " (merged)" else ""
+        return "Commit: $hash$mergedStr\n" +
+                "${commiter.name} ${commiter.email} commit timestamp: ${commiter.datetimeString} ${commiter.zoneSign}${commiter.zoneHours}:${commiter.zoneMinuts}\n$message"
+
+
     }
 
     override fun toString(): String {
@@ -137,17 +171,14 @@ class GitCommitObject(fileBytes: ByteArray) : GitObject() {
 fun performCatFileCommand(gitDirPath: String) {
     println("Enter git object hash:")
     val objHash = readln()
-    val objPath = "$gitDirPath/objects/${objHash.substring(0, 2)}/${objHash.substring(2)}"
-    val fis = FileInputStream(objPath)
-    val bos1 = ByteArrayOutputStream()
-    val ios = InflaterOutputStream(bos1)
-    var ch: Int
-    while (fis.read().also { ch = it } != -1) {
-        ios.write(ch)
-    }
-    val result = bos1.toByteArray()
-    val gitObj = GitObject.createObject(result)
-    println(gitObj)
+    println(getObjectFile(objHash, gitDirPath))
+}
+
+fun getObjectFile(objHash: String, gitDirPath: String): GitObject {
+
+
+    //    println(gitObj)
+    return GitObject.createObject(objHash, gitDirPath)
 }
 
 fun performListBranchesCommand(gitDirPath: String) {
@@ -169,6 +200,32 @@ fun performListBranchesCommand(gitDirPath: String) {
 
 }
 
+fun performLogCommand(gitDirPath: String) {
+    println("Enter branch name:")
+    val branch = readln()
+    val f = File("$gitDirPath/refs/heads/$branch")
+    if (f.exists()) {
+        val commit = f.readText().trimEnd('\n')
+        var gitObj = getObjectFile(commit, gitDirPath) as GitCommitObject
+        println(gitObj.logString())
+        while (gitObj.parent != "") {
+            println()
+            val parents = gitObj.parent.split(" | ")
+            if (parents.size > 1) {
+                gitObj = getObjectFile(parents.last(), gitDirPath) as GitCommitObject
+                gitObj.merged = true
+                println(gitObj.logString())
+                println()
+            }
+            gitObj = getObjectFile(parents.first(), gitDirPath) as GitCommitObject
+            println(gitObj.logString())
+        }
+    } else {
+        println("Invalid branch name")
+    }
+
+}
+
 fun main() {
     println("Enter .git directory location:")
     val gitDirPath = readln()
@@ -179,8 +236,12 @@ fun main() {
         performCatFileCommand(gitDirPath)
     } else if (cmd == "list-branches") {
         performListBranchesCommand(gitDirPath)
+    } else if (cmd == "log") {
+        performLogCommand(gitDirPath)
     } else {
         println("???")
     }
 
 }
+
+
