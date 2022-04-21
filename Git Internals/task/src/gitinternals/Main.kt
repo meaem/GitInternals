@@ -12,42 +12,34 @@ open class GitObject() {
         val linePattern = "^(\\w+) (.+)$".toRegex()
         val authorPattern = "^(\\w+) (\\w+) <(.+)> (\\d+) ([+-])(\\d{2})(\\d{2})$".toRegex()
         fun createObject(fileBytes: ByteArray): GitObject {
-//            val contentStr = String(c)
-//                .replace(Char(0), '\n')
             val header = String(fileBytes, 0, fileBytes.indexOf(0))
-//            val lines = contentStr.lines()
             val groups = linePattern.findAll(header)
-            if (groups.first().groupValues[1] == "blob") {
-                return GitBlobObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+            return if (groups.first().groupValues[1] == "blob") {
+                GitBlobObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
             } else if (groups.first().groupValues[1] == "commit") {//if (groups.first().groupValues[1] == "commit") {
-                return GitCommitObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
-            } else // (groups.first().groupValues[1] == "commit")
-            {
-                return GitTreeObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+                GitCommitObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+            } else {
+                GitTreeObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
             }
         }
-
-
     }
 }
 
 class GitBlobObject(fileBytes: ByteArray) : GitObject() {
-    val content = fileBytes.decodeToString() //skip the header
+    private val content = fileBytes.decodeToString() //skip the header
     override fun toString(): String {
         return "*BLOB*\n$content"
     }
 }
 
 class GitTreeObject(fileBytes: ByteArray) : GitObject() {
-    //    val c = fileBytes.copyOfRange()
-    private var content = ""//fileBytes.decodeToString()+"\n"
+    private var content = ""
 
     init {
         var fileBytesCopy = fileBytes.copyOf()
         var lastindex = fileBytesCopy.indexOf(0)
 
-//        var fileBytesCopy = fileBytes.copyOfRange(startIndex,lastindex + 20)
-//        var fileBytesCopy2 = fileBytes.copyOfRange(lastindex + 21,)
+
         while (lastindex != -1) {
             val fileBytesCopy2 = fileBytesCopy.copyOfRange(0, lastindex + 21)
             content += decodeTreeLine(fileBytesCopy2) + "\n"
@@ -59,12 +51,8 @@ class GitTreeObject(fileBytes: ByteArray) : GitObject() {
 
     private fun decodeTreeLine(lineBytes: ByteArray): String {
         val nullIndex = lineBytes.indexOf(0)
-//        println(nullIndex)
-//        println("-->"+lineBytes.joinToString (","))
-//return lineBytes.decodeToString()
         val first = lineBytes.copyOfRange(0, nullIndex).decodeToString().split(" ")
-        val second = lineBytes.copyOfRange(nullIndex + 1, lineBytes.size)
-            .map { String.format("%02x", it) }.joinToString("")
+        val second = lineBytes.copyOfRange(nullIndex + 1, lineBytes.size).joinToString("") { String.format("%02x", it) }
 
         return "${first[0]} $second ${first[1]}"
     }
@@ -75,17 +63,15 @@ class GitTreeObject(fileBytes: ByteArray) : GitObject() {
 }
 
 class GitCommitObject(fileBytes: ByteArray) : GitObject() {
-    lateinit var tree: String
+    var message: String
     var parent: String = ""
     lateinit var author: String
     lateinit var commiter: String
-     var message: String
-
+    lateinit var tree: String
     init {
         var nextLinesAreMessage = false
         val lines = fileBytes.decodeToString()
             .replace(Char(0), '\n').lines()
-//                    println(lines)
         message = ""
         parent = ""
         for (line in lines.withIndex()) {
@@ -93,7 +79,7 @@ class GitCommitObject(fileBytes: ByteArray) : GitObject() {
                 message += line.value + "\n"
             } else if (line.value.isBlank()) {
                 nextLinesAreMessage = true
-            } else { //if (line.index > 0) {
+            } else {
 
                 val linegroups = linePattern.findAll(line.value).first()
                 when (linegroups.groupValues[1]) {
