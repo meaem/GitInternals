@@ -1,7 +1,6 @@
 package gitinternals
 
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.FileInputStream
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -12,89 +11,130 @@ open class GitObject() {
     companion object {
         val linePattern = "^(\\w+) (.+)$".toRegex()
         val authorPattern = "^(\\w+) (\\w+) <(.+)> (\\d+) ([+-])(\\d{2})(\\d{2})$".toRegex()
-        fun createObject(c: String): GitObject {
-            val lines = c.lines()
-            val groups = linePattern.findAll(lines.first())
+        fun createObject(fileBytes: ByteArray): GitObject {
+//            val contentStr = String(c)
+//                .replace(Char(0), '\n')
+            val header = String(fileBytes, 0, fileBytes.indexOf(0))
+//            val lines = contentStr.lines()
+            val groups = linePattern.findAll(header)
             if (groups.first().groupValues[1] == "blob") {
-                return GitBlobObject(lines.subList(1, lines.size).joinToString("\n"))
-            } else {//if (groups.first().groupValues[1] == "commit") {
-                return GitCommitObject().also {
-                    var nextLinesAreMessage = false
-                    it.message = ""
-                    it.parent = ""
-                    for (line in lines.withIndex()) {
-                        if (nextLinesAreMessage) {
-                            it.message += line.value + "\n"
-                        } else if (line.value.isBlank()) {
-                            nextLinesAreMessage = true
-                        } else if (line.index > 0) {
-                            val linegroups = linePattern.findAll(line.value).first()
-                            when (linegroups.groupValues[1]) {
-                                "tree" -> it.tree = linegroups.groupValues[2]
-                                "parent" -> {
-                                    it.parent += (if (it.parent.isEmpty()) "" else " | ") + linegroups.groupValues[2]
-                                }
-                                "author" -> {
-                                    it.author = parseContributor(line.value, "author")
-                                }
-                                "committer" -> {
-                                    it.commiter = parseContributor(line.value, "committer")
-                                }
-
-                            }
-                        }
-                    }
-                    it.message = it.message.trimEnd('\n')
-                }
+                return GitBlobObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+            } else if (groups.first().groupValues[1] == "commit") {//if (groups.first().groupValues[1] == "commit") {
+                return GitCommitObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
+            } else // (groups.first().groupValues[1] == "commit")
+            {
+                return GitTreeObject(fileBytes.copyOfRange(fileBytes.indexOf(0) + 1, fileBytes.size))
             }
-
         }
 
-        private fun parseContributor(line: String, type: String): String {
-            val commitType = if (type == "committer") "commit" else "original"
-            val authGroups = authorPattern.findAll(line).first()
-            val name = authGroups.groupValues[2]
-            val email = authGroups.groupValues[3]
-            val datetime = authGroups.groupValues[4]
-            val zoneSign = authGroups.groupValues[5]
-            val zoneHours = authGroups.groupValues[6]
-            val zoneMinuts = authGroups.groupValues[7]
-            val zHours = zoneHours.toInt() * if (zoneSign == "-") -1 else 1
-            val zMinuts = zoneMinuts.toInt()
 
-            val instant = LocalDateTime.ofEpochSecond(
-                datetime.toLong(),
-                0,
-                ZoneOffset.ofHoursMinutes(zHours, zMinuts)
-            )
-//                                    val instant = Instant.ofEpochSecond(datetime.toLong())
-            val formtter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-            val datetimeString = formtter.format(instant)
-            return "$name $email $commitType timestamp: $datetimeString $zoneSign$zoneHours:$zoneMinuts"
-        }
     }
 }
 
-class GitBlobObject(val content: String) : GitObject() {
+class GitBlobObject(fileBytes: ByteArray) : GitObject() {
+    val content = fileBytes.decodeToString() //skip the header
     override fun toString(): String {
         return "*BLOB*\n$content"
     }
 }
 
-class GitTreeObject(val content: String) : GitObject() {
+class GitTreeObject(fileBytes: ByteArray) : GitObject() {
+    //    val c = fileBytes.copyOfRange()
+    private var content = ""//fileBytes.decodeToString()+"\n"
+
+    init {
+        var fileBytesCopy = fileBytes.copyOf()
+        var lastindex = fileBytesCopy.indexOf(0)
+
+//        var fileBytesCopy = fileBytes.copyOfRange(startIndex,lastindex + 20)
+//        var fileBytesCopy2 = fileBytes.copyOfRange(lastindex + 21,)
+        while (lastindex != -1) {
+            val fileBytesCopy2 = fileBytesCopy.copyOfRange(0, lastindex + 21)
+            content += decodeTreeLine(fileBytesCopy2) + "\n"
+            fileBytesCopy = fileBytesCopy.copyOfRange(lastindex + 21, fileBytesCopy.size)
+            lastindex = fileBytesCopy.indexOf(0)
+        }
+        content = content.trimEnd('\n')
+    }
+
+    private fun decodeTreeLine(lineBytes: ByteArray): String {
+        val nullIndex = lineBytes.indexOf(0)
+//        println(nullIndex)
+//        println("-->"+lineBytes.joinToString (","))
+//return lineBytes.decodeToString()
+        val first = lineBytes.copyOfRange(0, nullIndex).decodeToString().split(" ")
+        val second = lineBytes.copyOfRange(nullIndex + 1, lineBytes.size)
+            .map { String.format("%02x", it) }.joinToString("")
+
+        return "${first[0]} $second ${first[1]}"
+    }
+
     override fun toString(): String {
         return "*TREE*\n$content"
     }
 }
 
-class GitCommitObject(
-
-) : GitObject() {
+class GitCommitObject(fileBytes: ByteArray) : GitObject() {
     lateinit var tree: String
     var parent: String = ""
     lateinit var author: String
     lateinit var commiter: String
-    lateinit var message: String
+     var message: String
+
+    init {
+        var nextLinesAreMessage = false
+        val lines = fileBytes.decodeToString()
+            .replace(Char(0), '\n').lines()
+//                    println(lines)
+        message = ""
+        parent = ""
+        for (line in lines.withIndex()) {
+            if (nextLinesAreMessage) {
+                message += line.value + "\n"
+            } else if (line.value.isBlank()) {
+                nextLinesAreMessage = true
+            } else { //if (line.index > 0) {
+
+                val linegroups = linePattern.findAll(line.value).first()
+                when (linegroups.groupValues[1]) {
+                    "tree" -> tree = linegroups.groupValues[2]
+                    "parent" -> {
+                        parent += (if (parent.isEmpty()) "" else " | ") + linegroups.groupValues[2]
+                    }
+                    "author" -> {
+                        author = parseContributor(line.value, "author")
+                    }
+                    "committer" -> {
+                        commiter = parseContributor(line.value, "committer")
+                    }
+
+                }
+            }
+        }
+        message = message.trimEnd('\n')
+    }
+
+    private fun parseContributor(line: String, type: String): String {
+        val commitType = if (type == "committer") "commit" else "original"
+        val authGroups = authorPattern.findAll(line).first()
+        val name = authGroups.groupValues[2]
+        val email = authGroups.groupValues[3]
+        val datetime = authGroups.groupValues[4]
+        val zoneSign = authGroups.groupValues[5]
+        val zoneHours = authGroups.groupValues[6]
+        val zoneMinuts = authGroups.groupValues[7]
+        val zHours = zoneHours.toInt() * if (zoneSign == "-") -1 else 1
+        val zMinuts = zoneMinuts.toInt()
+
+        val instant = LocalDateTime.ofEpochSecond(
+            datetime.toLong(),
+            0,
+            ZoneOffset.ofHoursMinutes(zHours, zMinuts)
+        )
+        val formtter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        val datetimeString = formtter.format(instant)
+        return "$name $email $commitType timestamp: $datetimeString $zoneSign$zoneHours:$zoneMinuts"
+    }
 
     override fun toString(): String {
         return "*COMMIT*\n" +
@@ -106,18 +146,13 @@ class GitCommitObject(
     }
 }
 
-val debugFile = File("debug.txt")
 fun main() {
-//    "+0300".substring(1).split("\\d{2}".toRegex()).map { it.toInt() }
-//    val linePattern = "^(\\w+) (.+)$".toRegex()
-//    println(linePattern.findAll("commit 216").first().groupValues[1])
     println("Enter .git directory location:")
     val gitDirPath = readln()
 
     println("Enter git object hash:")
     val objHash = readln()
     val objPath = "$gitDirPath/objects/${objHash.substring(0, 2)}/${objHash.substring(2)}"
-//    println(objPath)
     val fis = FileInputStream(objPath)
     val bos1 = ByteArrayOutputStream()
     val ios = InflaterOutputStream(bos1)
@@ -126,11 +161,8 @@ fun main() {
         ios.write(ch)
     }
     val result = bos1.toByteArray()
-    val contentStr = String(result)
-        .replace(Char(0), '\n')
-    debugFile.writeText(contentStr)
 
-    val gitObj = GitObject.createObject(contentStr)
+    val gitObj = GitObject.createObject(result)
     println(gitObj)
 
 }
