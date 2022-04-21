@@ -146,7 +146,6 @@ fun performCatFileCommand(gitDirPath: String) {
         ios.write(ch)
     }
     val result = bos1.toByteArray()
-
     val gitObj = GitObject.createObject(result)
     println(gitObj)
 }
@@ -158,21 +157,14 @@ fun performListBranchesCommand(gitDirPath: String) {
     val currentBranch = if (currentBranchFile.exists()) currentBranchFile
         .readText().trimEnd('\n')
         .split("/").last() else ""
-//    println(currentBranch)
-    val f=File("$gitDirPath/refs/heads/")
-//    println("$gitDirPath/refs/heads/")
-//    println(f.isDirectory)
-//    println(f.exists())
-    val lst =f.list() ?: arrayOf("***","***")
-//    println(lst.joinToString("-"))
+    val f = File("$gitDirPath/refs/heads/")
+    val lst = f.list() ?: arrayOf()
     lst.let { l ->
         val branches = l.joinToString("\n") {
-//            println("$it --> $currentBranch")
             val pre = if (it == currentBranch) "* " else "  "
-             pre + it
+            pre + it
         }
         println(branches)
-
     }
 
 }
